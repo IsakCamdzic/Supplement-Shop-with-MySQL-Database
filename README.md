@@ -1,8 +1,8 @@
 # Supplement-Shop-with-MySQL-Database
-Complete e-commerce platform for sports supplements with multi-role dashboard (Admin, Stockkeeper, Delivery, Customer). Built with PHP and MySQL.
+Complete e-commerce platform for sports supplements with multi-role dashboard (Admin, Stockkeeper, Delivery, Customer). Built with PHP and MySQL. The focus of the project was the database itself.
 
 
-# 💪 SUPP.SCIENCE - E-commerce Platform for Sports Supplements
+# SUPP.SCIENCE - E-commerce Platform for Sports Supplements
 
 ![PHP](https://img.shields.io/badge/PHP-8.x-777BB4?logo=php&logoColor=white)
 ![MySQL](https://img.shields.io/badge/MySQL-8.x-4479A1?logo=mysql&logoColor=white)
@@ -48,15 +48,26 @@ SUPP.SCIENCE is a fully functional e-commerce system designed for online stores 
 
 ### Database Tables
 
-| Table | Description |
-|-------|-------------|
-| `kupac` | Customer information (name, email, address) |
-| `kategorija` | Product categories (Protein, Creatine, etc.) |
-| `proizvod` | Products with price, stock, manufacturer |
-| `korpa` + `stavke_korpe` | Shopping cart before checkout |
-| `narudzba` + `stavke_narudzbe` | Orders and order items |
-| `racun` | Invoices for each order |
-| `zaposlenik` | Employees (Admin, Stockkeeper, Delivery) |
+| Table                    | Description                                                                                                           |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------- |
+| `drzava`                 | Country information (id, unique country name)                                                                         |
+| `grad`                   | Town information with a reference to the country id (id, town name, unique constraint (town name and country id))     |
+| `adresa`                 | Address information (street, number, town, postal code)                                                               |
+| `kupac`                  | Customer information (name, surname, unique email, active status, creation and update timestamps)                     |
+| `zaposlenik_uloga`       | Employee roles (Admin, Stockkeeper, Delivery)                                                                         |
+| `zaposlenik`             | Employees with a reference to their role (name, surname, unique email, active status, creation and update timestamps) |
+| `kupac_adresa`           | Many-to-many relationship between customers and addresses, with an indicator for the default address                  |
+| `kategorija`             | Product categories with support for hierarchical parent-child categories                                              |
+| `proizvodjac`            | Product manufacturers (id, manufacturer name)                                                                         |
+| `proizvod`               | Product information with manufacturer, category, price, description and active status                                 |
+| `status_narudzbe`        | Order statuses (Pending, Confirmed, Delivered, Cancelled, Rejected)                                                   |
+| `narudzba`               | Orders with customer address, order date, status and assigned employee                                                |
+| `zaliha_transakcija`     | Inventory transactions for purchases, stock replenishment and stock corrections, optionally linked to an order        |
+| `stavke_narudzbe`        | Items belonging to orders, including product, quantity and price at the time of ordering                              |
+| `korpa` + `stavke_korpe` | Shopping cart and its items before checkout                                                                           |
+| `status_placanja`        | Payment statuses (Pending, Confirmed, Rejected)                                                                       |
+| `racun`                  | Invoices associated with orders, including issue date, payment status and total amount                                |
+
 
 ### SQL Features
 
@@ -65,6 +76,25 @@ SUPP.SCIENCE is a fully functional e-commerce system designed for online stores 
 - **Stored Procedures** - Batch status updates
 - **Foreign Keys** - Referential integrity
 - **Check Constraints** - Data validation (price > 0, stock >= 0)
+
+The database underwent a complete redesign:
+- **Separate customer entity** – Added a dedicated kupac table with customer information, active status, email, and timestamps.
+- **Multiple customer addresses** – Added kupac_adresa, allowing customers to have multiple addresses and designate a default address.
+- **Separate manufacturers** – Added proizvodjac so manufacturers are stored independently and can be reused across multiple products.
+- **Hierarchical categories** – Added roditelj_id to kategorija, allowing categories and subcategories to be organized in a hierarchy.
+- **Inventory transaction history** – Added zaliha_transakcija to track stock changes caused by purchases, restocking, and inventory corrections.
+- **Order status management** – Added status_narudzbe to manage different order states such as pending, confirmed, delivered, cancelled, and rejected.
+- **Payment status management** – Added status_placanja to separately track the payment status of invoices.
+- **Employee roles** – Added zaposlenik_uloga to manage employee roles such as Admin, Stockkeeper, and Delivery.
+- **Optional employee assignment** – Orders can initially exist without an assigned employee, allowing employees to be assigned later.
+- **Historical order prices** – stavke_narudzbe stores the product price at the time of purchase, preserving historical pricing even if the product's current price changes.
+- **Timestamps and active status** – Customers, employees, and products include created_at, updated_at, and aktivan fields for better data management.
+- **Sales analytics** – Added the top10_proizvoda view to identify the top-selling products based on quantity sold and total revenue.
+- **Improved data normalization** – Repeated information such as manufacturers, employee roles, order statuses, and payment statuses is separated into dedicated tables, reducing data duplication and improving consistency.
+
+### Entity-relationship diagram of the database used for the project
+<img width="3380" height="1890" alt="Blank diagram" src="https://github.com/user-attachments/assets/8b65da2d-fc48-400f-b2de-d995f5702028" />
+
 
 ---
 
@@ -77,16 +107,6 @@ SUPP.SCIENCE is a fully functional e-commerce system designed for online stores 
 | **Delivery** | View and update delivery status | `dostavljac/dashboard.php` |
 | **Customer** | Browse, cart, orders | `kupac/dashboard.php` |
 
-### Demo Accounts
-
-| Role | Email | Password |
-|------|-------|----------|
-| Admin | `admin@shop.com` | `password` |
-| Stockkeeper | `skladistar@shop.com` | `password` |
-| Delivery | `dostavljac@shop.com` | `password` |
-| Customer | `isak.camdzic@gmail.com` | `password` |
-
----
 
 ## Installation
 
