@@ -6,19 +6,19 @@ requireRole('kupac');
 
 // Dohvati ili kreiraj korpu za trenutnog kupca
 $stmt = $pdo->prepare("
-    SELECT id_korpe FROM korpa 
-    WHERE id_kupca = ? 
+    SELECT korpa_id FROM korpa 
+    WHERE kupac_id = ? 
     ORDER BY datum DESC LIMIT 1
 ");
 $stmt->execute([$_SESSION['user_id']]);
 $korpa = $stmt->fetch();
 
 if (!$korpa) {
-    $stmt = $pdo->prepare("INSERT INTO korpa (id_kupca) VALUES (?)");
+    $stmt = $pdo->prepare("INSERT INTO korpa (kupac_id) VALUES (?)");
     $stmt->execute([$_SESSION['user_id']]);
     $korpa_id = $pdo->lastInsertId();
 } else {
-    $korpa_id = $korpa['id_korpe'];
+    $korpa_id = $korpa['korpa_id'];
 }
 
 // Obrada dodavanja u korpu iz index.php
@@ -26,20 +26,19 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['add_to_cart'])) {
     $product_id = $_POST['product_id'];
     $kolicina = $_POST['kolicina'];
     $cijena = $_POST['cijena'];
-    
-    // Provjeri da li već postoji
-    $stmt = $pdo->prepare("SELECT kolicina FROM stavke_korpe WHERE id_korpe = ? AND id_proizvoda = ?");
+
+    $stmt = $pdo->prepare("SELECT kolicina FROM stavke_korpe WHERE korpa_id = ? AND proizvod_id = ?");
     $stmt->execute([$korpa_id, $product_id]);
     $postoji = $stmt->fetch();
-    
+
     if ($postoji) {
-        $stmt = $pdo->prepare("UPDATE stavke_korpe SET kolicina = kolicina + ? WHERE id_korpe = ? AND id_proizvoda = ?");
+        $stmt = $pdo->prepare("UPDATE stavke_korpe SET kolicina = kolicina + ? WHERE korpa_id = ? AND proizvod_id = ?");
         $stmt->execute([$kolicina, $korpa_id, $product_id]);
     } else {
-        $stmt = $pdo->prepare("INSERT INTO stavke_korpe (id_korpe, id_proizvoda, kolicina, cijena) VALUES (?, ?, ?, ?)");
+        $stmt = $pdo->prepare("INSERT INTO stavke_korpe (korpa_id, proizvod_id, kolicina, cijena) VALUES (?, ?, ?, ?)");
         $stmt->execute([$korpa_id, $product_id, $kolicina, $cijena]);
     }
-    
+
     header('Location: dashboard.php');
     exit();
 }
@@ -48,15 +47,15 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['add_to_cart'])) {
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['update_quantity'])) {
     $product_id = $_POST['product_id'];
     $kolicina = $_POST['kolicina'];
-    
+
     if ($kolicina <= 0) {
-        $stmt = $pdo->prepare("DELETE FROM stavke_korpe WHERE id_korpe = ? AND id_proizvoda = ?");
+        $stmt = $pdo->prepare("DELETE FROM stavke_korpe WHERE korpa_id = ? AND proizvod_id = ?");
         $stmt->execute([$korpa_id, $product_id]);
     } else {
-        $stmt = $pdo->prepare("UPDATE stavke_korpe SET kolicina = ? WHERE id_korpe = ? AND id_proizvoda = ?");
+        $stmt = $pdo->prepare("UPDATE stavke_korpe SET kolicina = ? WHERE korpa_id = ? AND proizvod_id = ?");
         $stmt->execute([$kolicina, $korpa_id, $product_id]);
     }
-    
+
     header('Location: dashboard.php');
     exit();
 }
@@ -64,7 +63,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['update_quantity'])) {
 // Obrada uklanjanja stavke
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['remove_item'])) {
     $product_id = $_POST['product_id'];
-    $stmt = $pdo->prepare("DELETE FROM stavke_korpe WHERE id_korpe = ? AND id_proizvoda = ?");
+    $stmt = $pdo->prepare("DELETE FROM stavke_korpe WHERE korpa_id = ? AND proizvod_id = ?");
     $stmt->execute([$korpa_id, $product_id]);
     header('Location: dashboard.php');
     exit();
@@ -72,55 +71,73 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['remove_item'])) {
 
 // Obrada checkout-a
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['checkout'])) {
-    $adresa_dostave = $_POST['adresa_dostave'] ?: null;
-    
     try {
         $pdo->beginTransaction();
-        
-        // Dohvati stavke korpe
+
+        // Nađi default adresu kupca
+        $stmt = $pdo->prepare("SELECT kupac_adresa_id FROM kupac_adresa WHERE kupac_id = ? AND je_default = TRUE LIMIT 1");
+        $stmt->execute([$_SESSION['user_id']]);
+        $kupac_adresa_id = $stmt->fetchColumn();
+
+        if (!$kupac_adresa_id) {
+            throw new Exception("Nemate postavljenu adresu za dostavu. Molimo dodajte adresu u profilu prije naručivanja.");
+        }
+
+        // Dohvati stavke korpe sa trenutnim stanjem zaliha
         $stmt = $pdo->prepare("
-            SELECT sk.id_proizvoda, sk.kolicina, sk.cijena, p.kolicina_na_stanju
+            SELECT sk.proizvod_id, sk.kolicina, sk.cijena,
+                COALESCE((SELECT SUM(zt.kolicina_promjena) FROM zaliha_transakcija zt WHERE zt.proizvod_id = sk.proizvod_id), 0) as kolicina_na_stanju
             FROM stavke_korpe sk
-            JOIN proizvod p ON sk.id_proizvoda = p.id_proizvoda
-            WHERE sk.id_korpe = ?
+            JOIN proizvod p ON sk.proizvod_id = p.proizvod_id
+            WHERE sk.korpa_id = ?
         ");
         $stmt->execute([$korpa_id]);
         $cart_items = $stmt->fetchAll();
-        
+
         if (empty($cart_items)) {
             throw new Exception("Korpa je prazna!");
         }
-        
-        // Provjera zaliha
+
         foreach ($cart_items as $item) {
             if ($item['kolicina_na_stanju'] < $item['kolicina']) {
-                throw new Exception("Nedovoljno zaliha za proizvod ID: " . $item['id_proizvoda']);
+                throw new Exception("Nedovoljno zaliha za proizvod ID: " . $item['proizvod_id']);
             }
         }
-        
-        // Kreiraj narudžbu
+
+        // Status "Na cekanju"
+        $stmt = $pdo->prepare("SELECT status_id FROM status_narudzbe WHERE naziv = 'Na cekanju'");
+        $stmt->execute();
+        $status_id = $stmt->fetchColumn();
+
+        // Kreiraj narudžbu (zaposlenik_id ostaje NULL dok se ne dodijeli)
         $stmt = $pdo->prepare("
-            INSERT INTO narudzba (id_kupca, adresa_dostave, status_narudzbe)
-            VALUES (?, ?, 'Na cekanju')
+            INSERT INTO narudzba (kupac_adresa_id, status_id, zaposlenik_id)
+            VALUES (?, ?, NULL)
         ");
-        $stmt->execute([$_SESSION['user_id'], $adresa_dostave]);
+        $stmt->execute([$kupac_adresa_id, $status_id]);
         $narudzba_id = $pdo->lastInsertId();
-        
-        // Prebaci stavke u narudžbu
+
+        // Prebaci stavke u narudžbu i upiši izlaz sa zaliha
         foreach ($cart_items as $item) {
             $stmt = $pdo->prepare("
-                INSERT INTO stavke_narudzbe (id_narudzbe, id_proizvoda, kolicina, cijena)
+                INSERT INTO stavke_narudzbe (narudzba_id, proizvod_id, kolicina, cijena)
                 VALUES (?, ?, ?, ?)
             ");
-            $stmt->execute([$narudzba_id, $item['id_proizvoda'], $item['kolicina'], $item['cijena']]);
+            $stmt->execute([$narudzba_id, $item['proizvod_id'], $item['kolicina'], $item['cijena']]);
+
+            $stmt = $pdo->prepare("
+                INSERT INTO zaliha_transakcija (proizvod_id, tip, kolicina_promjena, narudzba_id)
+                VALUES (?, 'Kupovina', ?, ?)
+            ");
+            $stmt->execute([$item['proizvod_id'], -$item['kolicina'], $narudzba_id]);
         }
-        
+
         // Isprazni korpu
-        $stmt = $pdo->prepare("DELETE FROM stavke_korpe WHERE id_korpe = ?");
+        $stmt = $pdo->prepare("DELETE FROM stavke_korpe WHERE korpa_id = ?");
         $stmt->execute([$korpa_id]);
-        
+
         $pdo->commit();
-        
+
         header('Location: narudzbe.php?success=1');
         exit();
     } catch (Exception $e) {
@@ -132,17 +149,18 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['checkout'])) {
 // Dohvati stavke korpe za prikaz
 $stmt = $pdo->prepare("
     SELECT 
-        sk.id_proizvoda,
+        sk.proizvod_id as id_proizvoda,
         p.naziv,
         sk.kolicina,
         sk.cijena,
         (sk.kolicina * sk.cijena) as ukupno,
-        p.proizvodjac,
-        k.naziv_kategorije
+        pr.naziv_proizvodjaca as proizvodjac,
+        k.naziv as naziv_kategorije
     FROM stavke_korpe sk
-    JOIN proizvod p ON sk.id_proizvoda = p.id_proizvoda
-    JOIN kategorija k ON p.id_kategorije = k.id_kategorije
-    WHERE sk.id_korpe = ?
+    JOIN proizvod p ON sk.proizvod_id = p.proizvod_id
+    JOIN kategorija k ON p.kategorija_id = k.kategorija_id
+    JOIN proizvodjac pr ON p.proizvodjac_id = pr.proizvodjac_id
+    WHERE sk.korpa_id = ?
 ");
 $stmt->execute([$korpa_id]);
 $cart_items = $stmt->fetchAll();
@@ -427,8 +445,7 @@ $free_shipping_needed = max(0, $free_shipping_threshold - $total);
                 <?php if (!empty($cart_items)): ?>
                 <form method="POST">
                     <div class="mb-md">
-                        <label class="font-label-bold text-on-surface-variant text-sm uppercase tracking-wider mb-xs block">Adresa dostave</label>
-                        <textarea name="adresa_dostave" rows="2" class="w-full bg-background border border-outline-variant rounded-lg px-md py-sm text-body-md focus:border-primary-fixed focus:ring-0 focus:outline-none transition-colors" placeholder="Ostavite prazno za adresu iz profila"></textarea>
+                        <p class="text-on-surface-variant text-body-md text-sm">Dostava na adresu iz vašeg profila.</p>
                     </div>
                     <button type="submit" name="checkout" class="w-full bg-primary-fixed text-on-primary-fixed font-label-bold py-md px-lg rounded-lg hover:brightness-110 transition-all flex items-center justify-center gap-sm">
                         <span class="material-symbols-outlined">shopping_bag_checkout</span>

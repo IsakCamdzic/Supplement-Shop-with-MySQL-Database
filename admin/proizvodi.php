@@ -10,17 +10,17 @@ if (isset($_GET['delete'])) {
     $id = (int)$_GET['delete'];
     
     // Provjeri da li proizvod ima narudžbi
-    $stmt = $pdo->prepare("SELECT COUNT(*) FROM stavke_narudzbe WHERE id_proizvoda = ?");
+    $stmt = $pdo->prepare("SELECT COUNT(*) FROM stavke_narudzbe WHERE proizvod_id = ?");
     $stmt->execute([$id]);
     $has_orders = $stmt->fetchColumn();
     
     if ($has_orders > 0) {
         $error = "Ne možete obrisati proizvod koji je već naručen!";
     } else {
-        $stmt = $pdo->prepare("DELETE FROM stavke_korpe WHERE id_proizvoda = ?");
+        $stmt = $pdo->prepare("DELETE FROM stavke_korpe WHERE proizvod_id = ?");
         $stmt->execute([$id]);
         
-        $stmt = $pdo->prepare("DELETE FROM proizvod WHERE id_proizvoda = ?");
+        $stmt = $pdo->prepare("DELETE FROM proizvod WHERE proizvod_id = ?");
         $stmt->execute([$id]);
         
         $success = "Proizvod uspješno obrisan!";
@@ -32,12 +32,15 @@ if (isset($_GET['delete'])) {
 // Dohvati sve proizvode
 $stmt = $pdo->query("
     SELECT 
-        p.*,
-        k.naziv_kategorije,
-        (SELECT COUNT(*) FROM stavke_narudzbe WHERE id_proizvoda = p.id_proizvoda) as broj_narudzbi
+        p.proizvod_id as id_proizvoda, p.naziv, p.cijena,
+        pr.naziv_proizvodjaca as proizvodjac,
+        k.naziv as naziv_kategorije,
+        COALESCE((SELECT SUM(zt.kolicina_promjena) FROM zaliha_transakcija zt WHERE zt.proizvod_id = p.proizvod_id), 0) as kolicina_na_stanju,
+        (SELECT COUNT(*) FROM stavke_narudzbe WHERE proizvod_id = p.proizvod_id) as broj_narudzbi
     FROM proizvod p
-    JOIN kategorija k ON p.id_kategorije = k.id_kategorije
-    ORDER BY p.id_proizvoda
+    JOIN kategorija k ON p.kategorija_id = k.kategorija_id
+    JOIN proizvodjac pr ON p.proizvodjac_id = pr.proizvodjac_id
+    ORDER BY p.proizvod_id
 ");
 $products = $stmt->fetchAll();
 

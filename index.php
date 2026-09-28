@@ -1,19 +1,21 @@
 <?php
+session_start(); 
 require_once 'config/database.php';
 require_once 'includes/image_helper.php';
 
 // Dohvati sve proizvode
 $stmt = $pdo->query("
     SELECT 
-        p.id_proizvoda,
+        p.proizvod_id as id_proizvoda,
         p.naziv,
         p.cijena,
-        p.kolicina_na_stanju,
-        p.proizvodjac,
-        k.naziv_kategorije
+        COALESCE((SELECT SUM(zt.kolicina_promjena) FROM zaliha_transakcija zt WHERE zt.proizvod_id = p.proizvod_id), 0) as kolicina_na_stanju,
+        pr.naziv_proizvodjaca as proizvodjac,
+        k.naziv as naziv_kategorije
     FROM proizvod p
-    JOIN kategorija k ON p.id_kategorije = k.id_kategorije
-    ORDER BY p.id_proizvoda ASC
+    JOIN kategorija k ON p.kategorija_id = k.kategorija_id
+    JOIN proizvodjac pr ON p.proizvodjac_id = pr.proizvodjac_id
+    ORDER BY p.proizvod_id ASC
 ");
 $products = $stmt->fetchAll();
 ?>

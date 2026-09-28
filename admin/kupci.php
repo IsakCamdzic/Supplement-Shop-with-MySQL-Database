@@ -9,18 +9,21 @@ requireRole('admin');
 // Dohvati sve kupce sa statistikom
 $stmt = $pdo->query("
     SELECT 
-        k.id_kupca,
-        k.ime,
-        k.prezime,
-        k.email,
-        k.adresa,
-        COUNT(DISTINCT n.id_narudzbe) as broj_narudzbi,
+        k.kupac_id as id_kupca, k.ime, k.prezime, k.email,
+        CONCAT(a.ulica, ' ', a.broj, ', ', g.grad, ', ', d.drzava) as adresa,
+        COUNT(DISTINCT n.narudzba_id) as broj_narudzbi,
         COALESCE(SUM(r.ukupan_iznos), 0) as ukupno_potroseno,
         MAX(n.datum) as zadnja_narudzba
     FROM kupac k
-    LEFT JOIN narudzba n ON k.id_kupca = n.id_kupca
-    LEFT JOIN racun r ON n.id_narudzbe = r.id_narudzbe AND r.status_placanja = 'Potvrdjeno'
-    GROUP BY k.id_kupca
+    LEFT JOIN kupac_adresa ka ON k.kupac_id = ka.kupac_id AND ka.je_default = TRUE
+    LEFT JOIN adresa a ON ka.adresa_id = a.adresa_id
+    LEFT JOIN grad g ON a.grad_id = g.grad_id
+    LEFT JOIN drzava d ON g.drzava_id = d.drzava_id
+    LEFT JOIN kupac_adresa ka2 ON k.kupac_id = ka2.kupac_id
+    LEFT JOIN narudzba n ON ka2.kupac_adresa_id = n.kupac_adresa_id
+    LEFT JOIN racun r ON n.narudzba_id = r.narudzba_id 
+        AND r.status_placanja_id = (SELECT status_placanja_id FROM status_placanja WHERE status_naziv = 'Potvrdjeno')
+    GROUP BY k.kupac_id
     ORDER BY ukupno_potroseno DESC
 ");
 $customers = $stmt->fetchAll();

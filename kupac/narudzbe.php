@@ -6,16 +6,22 @@ requireRole('kupac');
 // Dohvati sve narudžbe kupca
 $stmt = $pdo->prepare("
     SELECT 
-        n.id_narudzbe,
+        n.narudzba_id as id_narudzbe,
         n.datum,
-        n.status_narudzbe,
-        n.adresa_dostave,
-        r.status_placanja,
+        sn.naziv as status_narudzbe,
+        CONCAT(a.ulica, ' ', a.broj, ', ', g.grad, ', ', d.drzava) as adresa_dostave,
+        sp.status_naziv as status_placanja,
         r.ukupan_iznos,
         r.datum_izdavanja
     FROM narudzba n
-    LEFT JOIN racun r ON n.id_narudzbe = r.id_narudzbe
-    WHERE n.id_kupca = ?
+    JOIN kupac_adresa ka ON n.kupac_adresa_id = ka.kupac_adresa_id
+    JOIN adresa a ON ka.adresa_id = a.adresa_id
+    JOIN grad g ON a.grad_id = g.grad_id
+    JOIN drzava d ON g.drzava_id = d.drzava_id
+    JOIN status_narudzbe sn ON n.status_id = sn.status_id
+    LEFT JOIN racun r ON n.narudzba_id = r.narudzba_id
+    LEFT JOIN status_placanja sp ON r.status_placanja_id = sp.status_placanja_id
+    WHERE ka.kupac_id = ?
     ORDER BY n.datum DESC
 ");
 $stmt->execute([$_SESSION['user_id']]);
@@ -247,17 +253,15 @@ function getPaymentBadge($status) {
             // Dohvati stavke narudžbe
             $stmt = $pdo->prepare("
                 SELECT 
-                    p.id_proizvoda,
-                    p.naziv,
-                    sn.kolicina,
-                    sn.cijena,
+                    sn.proizvod_id as id_proizvoda, p.naziv, sn.kolicina, sn.cijena,
                     (sn.kolicina * sn.cijena) as ukupno,
-                    p.proizvodjac,
-                    k.naziv_kategorije
+                    pr.naziv_proizvodjaca as proizvodjac,
+                    k.naziv as naziv_kategorije
                 FROM stavke_narudzbe sn
-                JOIN proizvod p ON sn.id_proizvoda = p.id_proizvoda
-                JOIN kategorija k ON p.id_kategorije = k.id_kategorije
-                WHERE sn.id_narudzbe = ?
+                JOIN proizvod p ON sn.proizvod_id = p.proizvod_id
+                JOIN kategorija k ON p.kategorija_id = k.kategorija_id
+                JOIN proizvodjac pr ON p.proizvodjac_id = pr.proizvodjac_id
+                WHERE sn.narudzba_id = ?
             ");
             $stmt->execute([$orderId]);
             $items = $stmt->fetchAll();

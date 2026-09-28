@@ -15,26 +15,30 @@ $order_id = (int)$_GET['id'];
 // Dohvati podatke o narudžbi
 $stmt = $pdo->prepare("
     SELECT 
-        n.id_narudzbe,
-        n.datum,
-        n.status_narudzbe,
-        n.adresa_dostave,
-        k.id_kupca,
+        n.narudzba_id as id_narudzbe, n.datum,
+        sn.naziv as status_narudzbe,
+        CONCAT(a.ulica, ' ', a.broj, ', ', g.grad, ', ', d.drzava) as adresa_dostave,
+        k.kupac_id as id_kupca,
         CONCAT(k.ime, ' ', k.prezime) as kupac_ime,
         k.email as kupac_email,
-        k.adresa as kupac_adresa,
-        r.id_racuna,
-        r.status_placanja,
-        r.datum_izdavanja,
-        r.ukupan_iznos,
-        z.id_zaposlenika,
+        CONCAT(a.ulica, ' ', a.broj, ', ', g.grad, ', ', d.drzava) as kupac_adresa,
+        r.racun_id as id_racuna, sp.status_naziv as status_placanja,
+        r.datum_izdavanja, r.ukupan_iznos,
+        z.zaposlenik_id as id_zaposlenika,
         CONCAT(z.ime, ' ', z.prezime) as zaposlenik_ime,
-        z.uloga as zaposlenik_uloga
+        zu.naziv as zaposlenik_uloga
     FROM narudzba n
-    JOIN kupac k ON n.id_kupca = k.id_kupca
-    LEFT JOIN racun r ON n.id_narudzbe = r.id_narudzbe
-    LEFT JOIN zaposlenik z ON n.id_zaposlenika = z.id_zaposlenika
-    WHERE n.id_narudzbe = ?
+    JOIN kupac_adresa ka ON n.kupac_adresa_id = ka.kupac_adresa_id
+    JOIN kupac k ON ka.kupac_id = k.kupac_id
+    JOIN adresa a ON ka.adresa_id = a.adresa_id
+    JOIN grad g ON a.grad_id = g.grad_id
+    JOIN drzava d ON g.drzava_id = d.drzava_id
+    JOIN status_narudzbe sn ON n.status_id = sn.status_id
+    LEFT JOIN racun r ON n.narudzba_id = r.narudzba_id
+    LEFT JOIN status_placanja sp ON r.status_placanja_id = sp.status_placanja_id
+    LEFT JOIN zaposlenik z ON n.zaposlenik_id = z.zaposlenik_id
+    LEFT JOIN zaposlenik_uloga zu ON z.uloga_id = zu.uloga_id
+    WHERE n.narudzba_id = ?
 ");
 $stmt->execute([$order_id]);
 $order = $stmt->fetch();
@@ -46,23 +50,24 @@ if (!$order) {
 // Dohvati stavke narudžbe
 $stmt = $pdo->prepare("
     SELECT 
-        sn.id_proizvoda,
-        p.naziv,
-        sn.kolicina,
-        sn.cijena,
+        sn.proizvod_id as id_proizvoda, p.naziv, sn.kolicina, sn.cijena,
         (sn.kolicina * sn.cijena) as ukupno,
-        p.proizvodjac,
-        k.naziv_kategorije
+        pr.naziv_proizvodjaca as proizvodjac,
+        k.naziv as naziv_kategorije
     FROM stavke_narudzbe sn
-    JOIN proizvod p ON sn.id_proizvoda = p.id_proizvoda
-    JOIN kategorija k ON p.id_kategorije = k.id_kategorije
-    WHERE sn.id_narudzbe = ?
+    JOIN proizvod p ON sn.proizvod_id = p.proizvod_id
+    JOIN kategorija k ON p.kategorija_id = k.kategorija_id
+    JOIN proizvodjac pr ON p.proizvodjac_id = pr.proizvodjac_id
+    WHERE sn.narudzba_id = ?
 ");
 $stmt->execute([$order_id]);
 $items = $stmt->fetchAll();
 
 // Dohvati sve zaposlenike za dodjelu
-$stmt = $pdo->query("SELECT id_zaposlenika, ime, prezime, uloga, email FROM zaposlenik");
+$stmt = $pdo->query("
+    SELECT z.zaposlenik_id as id_zaposlenika, z.ime, z.prezime, zu.naziv as uloga, z.email 
+    FROM zaposlenik z JOIN zaposlenik_uloga zu ON z.uloga_id = zu.uloga_id
+");
 $employees = $stmt->fetchAll();
 
 // Ukupan iznos
@@ -71,37 +76,44 @@ $total_amount = array_sum(array_column($items, 'ukupno'));
 // Obrada POST zahtjeva
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     if (isset($_POST['update_status'])) {
-        $new_status = $_POST['status_narudzbe'];
-        $stmt = $pdo->prepare("UPDATE narudzba SET status_narudzbe = ? WHERE id_narudzbe = ?");
-        $stmt->execute([$new_status, $order_id]);
+        $stmt = $pdo->prepare("SELECT status_id FROM status_narudzbe WHERE naziv = ?");
+        $stmt->execute([$_POST['status_narudzbe']]);
+        $status_id = $stmt->fetchColumn();
+        $stmt = $pdo->prepare("UPDATE narudzba SET status_id = ? WHERE narudzba_id = ?");
+        $stmt->execute([$status_id, $order_id]);
         header("Location: order_details.php?id=$order_id");
         exit();
     }
     
     if (isset($_POST['update_payment'])) {
-        $new_payment = $_POST['status_placanja'];
+        $stmt = $pdo->prepare("SELECT status_placanja_id FROM status_placanja WHERE status_naziv = ?");
+        $stmt->execute([$_POST['status_placanja']]);
+        $sp_id = $stmt->fetchColumn();
         if ($order['id_racuna']) {
-            $stmt = $pdo->prepare("UPDATE racun SET status_placanja = ? WHERE id_narudzbe = ?");
-            $stmt->execute([$new_payment, $order_id]);
+            $stmt = $pdo->prepare("UPDATE racun SET status_placanja_id = ? WHERE narudzba_id = ?");
+            $stmt->execute([$sp_id, $order_id]);
         } else {
-            $stmt = $pdo->prepare("INSERT INTO racun (id_narudzbe, status_placanja, ukupan_iznos) VALUES (?, ?, ?)");
-            $stmt->execute([$order_id, $new_payment, $total_amount]);
+            $stmt = $pdo->prepare("INSERT INTO racun (narudzba_id, status_placanja_id, ukupan_iznos) VALUES (?, ?, ?)");
+            $stmt->execute([$order_id, $sp_id, $total_amount]);
         }
         header("Location: order_details.php?id=$order_id");
         exit();
     }
+
     
     if (isset($_POST['assign_employee'])) {
         $employee_id = $_POST['id_zaposlenika'] ?: null;
-        $stmt = $pdo->prepare("UPDATE narudzba SET id_zaposlenika = ? WHERE id_narudzbe = ?");
+        $stmt = $pdo->prepare("UPDATE narudzba SET zaposlenik_id = ? WHERE narudzba_id = ?");
         $stmt->execute([$employee_id, $order_id]);
         header("Location: order_details.php?id=$order_id");
         exit();
     }
     
     if (isset($_POST['cancel_order'])) {
-        $stmt = $pdo->prepare("UPDATE narudzba SET status_narudzbe = 'Otkazano' WHERE id_narudzbe = ?");
-        $stmt->execute([$order_id]);
+        $stmt = $pdo->prepare("SELECT status_id FROM status_narudzbe WHERE naziv = 'Otkazano'");
+        $status_id = $stmt->fetchColumn();
+        $stmt = $pdo->prepare("UPDATE narudzba SET status_id = ? WHERE narudzba_id = ?");
+        $stmt->execute([$status_id, $order_id]);
         header("Location: order_details.php?id=$order_id");
         exit();
     }

@@ -23,13 +23,17 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $password = $_POST['password'];
     
     // Prvo provjeri u tabeli kupac
-    $stmt = $pdo->prepare("SELECT id_kupca as id, ime, prezime, email, 'kupac' as role FROM kupac WHERE email = ?");
+    $stmt = $pdo->prepare("SELECT kupac_id as id, ime, prezime, email, 'kupac' as role FROM kupac WHERE email = ?");
     $stmt->execute([$email]);
     $user = $stmt->fetch();
-    
+
     if (!$user) {
-        // Provjeri u zaposlenik
-        $stmt = $pdo->prepare("SELECT id_zaposlenika as id, ime, prezime, email, LOWER(uloga) as role FROM zaposlenik WHERE email = ?");
+        $stmt = $pdo->prepare("
+            SELECT z.zaposlenik_id as id, z.ime, z.prezime, z.email, LOWER(zu.naziv) as role
+            FROM zaposlenik z
+            JOIN zaposlenik_uloga zu ON z.uloga_id = zu.uloga_id
+            WHERE z.email = ?
+        ");
         $stmt->execute([$email]);
         $user = $stmt->fetch();
     }
